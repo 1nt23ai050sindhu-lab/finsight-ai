@@ -1,0 +1,14 @@
+streamlit
+pandas
+numpy
+plotly
+transformers
+torch
+requests
+pypdf
+sentence-transformers
+faiss-cpu
+groq
+joblib
+scikit-learn
+xgboost
