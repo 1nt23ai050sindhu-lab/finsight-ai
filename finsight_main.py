@@ -1,4 +1,6 @@
 import os
+import requests
+import pandas as pd
 import streamlit as st
 
 st.set_page_config(
@@ -74,7 +76,6 @@ elif page == "🔍 Fraud Detection":
 
     import numpy as np
     import joblib
-    
 
     st.markdown("### Enter Transaction Features")
     col1, col2 = st.columns(2)
@@ -87,18 +88,16 @@ elif page == "🔍 Fraud Detection":
     if st.button("🔍 Check Transaction"):
         features = np.random.randn(1, 30)
         features[0][29] = amount / 25000
-        
         try:
             model = joblib.load("model.pkl")
             pred = model.predict(features)[0]
             prob = model.predict_proba(features)[0][1]
-            
             if pred == 1:
                 st.error(f"🚨 FRAUD DETECTED! Confidence: {prob:.2%}")
             else:
                 st.success(f"✅ LEGITIMATE Transaction. Fraud probability: {prob:.2%}")
         except:
-            st.warning("model.pkl not found — copy it from fraud-detection folder!")
+            st.warning("model.pkl not found — running in demo mode")
             if np.random.random() > 0.8:
                 st.error("🚨 FRAUD DETECTED! Confidence: 94.3%")
             else:
@@ -139,7 +138,6 @@ elif page == "📄 Document Q&A":
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(np.array(embeddings))
         st.success(f"✅ Ready! {len(chunks)} chunks indexed.")
-
         question = st.text_input("Ask a question about your document")
         if question:
             with st.spinner("Thinking..."):
@@ -159,8 +157,6 @@ elif page == "📊 Sentiment Analysis":
     st.markdown("Real-time financial news sentiment powered by FinBERT")
     st.markdown("---")
 
-    import requests
-    import pandas as pd
     import plotly.express as px
     from transformers import pipeline
 
@@ -170,12 +166,36 @@ elif page == "📊 Sentiment Analysis":
     def load_sentiment_model():
         return pipeline("sentiment-analysis", model="ProsusAI/finbert", truncation=True, max_length=512)
 
+    def get_news(query, count=20):
+        # try specific query first
+        url = f"https://newsapi.org/v2/everything?q={query}&language=en&pageSize={count}&apiKey={NEWS_API_KEY}"
+        articles = requests.get(url).json().get("articles", [])
+
+        # fallback to broader query if no results
+        if not articles:
+            st.info(f"No news found for '{query}' — showing general finance news instead")
+            url = f"https://newsapi.org/v2/everything?q=finance+technology+software&language=en&pageSize={count}&apiKey={NEWS_API_KEY}"
+            articles = requests.get(url).json().get("articles", [])
+
+        # clean articles
+        clean = []
+        for a in articles:
+            if a.get("title") and a.get("description") and a["title"] != "[Removed]":
+                clean.append({
+                    "title": a["title"],
+                    "source": a["source"]["name"],
+                    "description": a["description"]
+                })
+        return pd.DataFrame(clean) if clean else pd.DataFrame(columns=["title","source","description"])
+
     query = st.text_input("Enter company/stock name", value="PhonePe fintech")
     if st.button("🚀 Analyze Sentiment"):
         with st.spinner("Fetching news..."):
-            url = f"https://newsapi.org/v2/everything?q={query}&language=en&pageSize=20&apiKey={NEWS_API_KEY}"
-            articles = requests.get(url).json().get("articles", [])
-            df = pd.DataFrame([{"title": a["title"], "source": a["source"]["name"], "description": a["description"]} for a in articles if a["title"]])
+            df = get_news(query)
+
+        if df.empty:
+            st.error("Could not fetch any news. Please try again later.")
+            st.stop()
 
         with st.spinner("Analyzing with FinBERT..."):
             model = load_sentiment_model()
@@ -184,9 +204,18 @@ elif page == "📊 Sentiment Analysis":
             for i, (_, row) in enumerate(df.iterrows()):
                 text = str(row["title"]) + " " + str(row["description"])
                 result = model(text[:500])[0]
-                results.append({"title": row["title"], "source": row["source"], "sentiment": result["label"], "confidence": round(result["score"], 3)})
+                results.append({
+                    "title": row["title"],
+                    "source": row["source"],
+                    "sentiment": result["label"],
+                    "confidence": round(result["score"], 3)
+                })
                 progress.progress((i+1)/len(df))
             sdf = pd.DataFrame(results)
+
+        if sdf.empty:
+            st.error("Sentiment analysis failed. Please try again.")
+            st.stop()
 
         pos = len(sdf[sdf["sentiment"]=="positive"])
         neg = len(sdf[sdf["sentiment"]=="negative"])
